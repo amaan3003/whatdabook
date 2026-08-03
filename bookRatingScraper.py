@@ -1,5 +1,7 @@
 import requests
 import re
+import json
+import pandas as pd
 
 def extract_user_id(url: str) -> str:
     match = re.search(r"/user/show/(\d+)", url)
@@ -9,12 +11,15 @@ def extract_user_id(url: str) -> str:
 
 
 
-userProfile =  input("Enter your goodreads account: ")
+def scrape_goodreads(user_url):
+    user_id = extract_user_id(user_url)
+    if user_id == "invalid url":
+        return None                               
 
-userId = extract_user_id(userProfile)
+    url = f"https://api.piratereads.com/{user_id}/read"
+    response = requests.get(url)
 
-url = f"https://api.piratereads.com/{userId}/read"
+    if response.status_code != 200:
+        return None                                  
 
-response = requests.request("GET", url)
-
-print(response.text)
+    return response.json()                            
