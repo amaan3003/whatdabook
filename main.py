@@ -18,8 +18,11 @@ if not telegramBot:
     raise ValueError("API_KEY not found in environment")
 
 
+reader = easyocr.Reader(['en'], gpu=False)
+
+
+
 def ocr(path):
-    reader = easyocr.Reader(['en'], gpu=False)
     result = reader.readtext(path)
     return " ".join([text for _, text, conf in result if conf > 0.3])
  
@@ -108,6 +111,7 @@ async def button_handler(update, context):
         
         await query.message.reply_text(msg, parse_mode="Markdown")
  
+
  
 app = Application.builder().token(telegramBot).build()
 init_db()
@@ -117,3 +121,7 @@ app.add_handler(CommandHandler("recommend", recommend_cmd))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(CallbackQueryHandler(button_handler)) 
 app.run_polling()
+
+
+
+

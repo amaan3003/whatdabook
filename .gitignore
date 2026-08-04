@@ -3,5 +3,6 @@ __pycache__/
 *.pyc
 users.db
 *.pkl
+!book_names.pkl
 incoming.jpg
 kaggle_book_ratings/
