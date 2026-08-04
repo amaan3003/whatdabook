@@ -11,6 +11,19 @@ from userBasedMLmodel import recommend_for_user
 import json
 load_dotenv()
 
+from flask import Flask
+import threading
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    port = int(os.environ.get('PORT', 8000))
+    flask_app.run(host='0.0.0.0', port=port)
+
 telegramBot = os.getenv("TELEGRAM_TOKEN")
 
 
@@ -120,6 +133,7 @@ app.add_handler(CommandHandler("goodreads",goodreads))
 app.add_handler(CommandHandler("recommend", recommend_cmd))  
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(CallbackQueryHandler(button_handler)) 
+threading.Thread(target=run_flask, daemon=True).start()
 app.run_polling()
 
 
