@@ -4,5 +4,6 @@ __pycache__/
 users.db
 *.pkl
 !book_names.pkl
+!genre_data.pkl
 incoming.jpg
 kaggle_book_ratings/
