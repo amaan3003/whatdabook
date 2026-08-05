@@ -1,12 +1,9 @@
 # 📚 WhatDaBook
 
-**Snap a photo of any book's cover — get a full breakdown and personalized recommendations, right inside Telegram.**
+**Click a photo of any book's cover and get a full breakdown and personalized recommendations, right inside Telegram.**
 
 Ever stood in a bookstore holding a book, with no idea if it's actually worth your time? WhatDaBook answers that in seconds. Point your camera at a cover and the bot tells you what the book is about, what readers loved, what they didn't, and whether *you'd* actually enjoy it — using your own reading taste.
 
-> ⚠️ **Work in progress.** Core pipeline works end-to-end; features are being actively added. A dedicated walkthrough video is coming soon.
-
----
 
 ## What it does
 
@@ -71,22 +68,13 @@ Building this surfaced a lot of real problems worth documenting:
 
 - **Fusing two recommenders** — combining collaborative and content-based signals into one coherent ranking rather than two separate lists.
 - **Latency** — keeping the full OCR → LLM → recommendation chain fast enough for a chat interface.
-- **Local vs cloud LLM** — the tradeoff between privacy/cost/control (local) and quality/speed/no-infra (cloud).
+- **Local vs cloud LLM** — the tradeoff between privacy/cost/control (local) and quality/speed/no-infra (cloud). And also finding the most cost effective llm model for this task!
 - **Data sparsity** — the raw ratings matrix was ~99% empty; most books had a single rating. Aggressive filtering (minimum ratings per book, minimum books per user) was needed before similarity became meaningful.
 - **Entity resolution** — *"Atomic Habits: An Easy & Proven Way to Build Good Habits"* in one dataset is just *"Atomic Habits"* in another, and the model treats them as different items. Solved with fuzzy string matching.
 - **End-to-end architecture** — building this as a connected system rather than disconnected scripts.
 
 ---
 
-## Roadmap
-
-- [ ] Expand bot functionality
-- [ ] Persistent user profiles with taste that sharpens over time
-- [ ] Optimize the collaborative filtering model
-- [ ] Drive latency down further
-- [ ] Additional recommendation models for deeper personalization
-
----
 
 ## Running locally
 
