@@ -42,7 +42,7 @@ Both recommenders share the same core idea: **turn each book into a vector, meas
 | Layer | Tool |
 |---|---|
 | Bot framework | `python-telegram-bot` |
-| OCR | EasyOCR |
+| OCR | Google Vision API |
 | Summarization | LLM API |
 | Data / ML | pandas, scikit-learn (cosine similarity) |
 | Storage | SQLite |
