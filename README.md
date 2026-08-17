@@ -22,7 +22,7 @@ Photo → OCR → LLM summary → Recommenders → Telegram reply
                         User's Goodreads data
 ```
 
-**OCR** — reads the title off the cover image using EasyOCR.
+**OCR** — reads the title off the cover image using Google Vision API.
 
 **LLM summary** — the extracted title is sent to an LLM, which returns a structured Telegram-formatted message (description, summary, likes, dislikes, verdict).
 
