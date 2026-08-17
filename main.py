@@ -9,10 +9,16 @@ from db import init_db, save_user, get_user,save_goodreads
 from bookRatingScraper import scrape_goodreads
 from userBasedMLmodel import recommend_for_user
 import json
+from google.cloud import vision
+from google.api_core.client_options import ClientOptions
 load_dotenv()
-
 from flask import Flask
 import threading
+
+
+
+
+
 
 flask_app = Flask(__name__)
 
@@ -24,21 +30,37 @@ def run_flask():
     port = int(os.environ.get('PORT', 8000))
     flask_app.run(host='0.0.0.0', port=port)
 
+
+
+
+
+
+
 telegramBot = os.getenv("TELEGRAM_TOKEN")
-
-
 if not telegramBot:
     raise ValueError("API_KEY not found in environment")
 
 
-reader = easyocr.Reader(['en'], gpu=False)
+
+
+
 
 
 
 def ocr(path):
-    result = reader.readtext(path)
-    return " ".join([text for _, text, conf in result if conf > 0.3])
- 
+    client = vision.ImageAnnotatorClient(
+        client_options=ClientOptions(api_key=os.getenv("GOOGLE_CLOUD_VISION_API_KEY"))
+    )
+
+    with open(path, "rb") as f:
+        content = f.read()
+        
+    image = vision.Image(content=content)
+    response = client.text_detection(image=image)   
+    texts = response.text_annotations           
+    
+    return texts[0].description if texts else "" 
+
  
 
 
@@ -79,10 +101,9 @@ async def recommend_cmd(update, context):
 
     await update.message.reply_text("Finding books for you... ⏳")
 
-    data = json.loads(goodreads_data)             # string -> structure
-    recs = recommend_for_user(data, n=5)          # get recommendations from the model
-
-    if not recs:                                  # empty (no matching books found)
+    data = json.loads(goodreads_data)             
+    recs = recommend_for_user(data, n=5)          
+    if not recs:                                  
         await update.message.reply_text("Couldn't find good matches yet — your books might not be in my dataset.")
         return
 
@@ -126,6 +147,12 @@ async def button_handler(update, context):
  
 
  
+ 
+ 
+
+
+# App handlers
+
 app = Application.builder().token(telegramBot).build()
 init_db()
 app.add_handler(CommandHandler("start", start))

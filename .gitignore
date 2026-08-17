@@ -7,3 +7,4 @@ users.db
 !genre_data.pkl
 incoming.jpg
 kaggle_book_ratings/
+*.json

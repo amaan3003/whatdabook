@@ -10,7 +10,7 @@ HEADERS = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
 
 def summarize(description: str) -> str:
     payload = {
-        "model": "deepseek/deepseek-v4-flash",
+        "model": "deepseek/deepseek-v4-flash-0731",
         "messages": [
             {"role": "system", "content": "You are a book info formatter. Return ONLY a clean, well-spaced message with emojis."},
             {"role": "user", "content": f"""Format this book info into a clean Telegram message. Use this exact structure:
