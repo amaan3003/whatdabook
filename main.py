@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from summarizer import summarize
 from recommendationModel import get_genres,get_similar_books
 from db import init_db, save_user, get_user,save_goodreads
-from bookRatingScraper import scrape_goodreads
+from bookRatingScraper import build_reading_profile, scrape_goodreads
 from userBasedMLmodel import recommend_for_user
 import json
 from google.cloud import vision
@@ -77,7 +77,7 @@ async def start(update, context):
         "• Reasons you might like or dislike it\n"
         "• Similar books to explore\n\n"
         "✨ <b>Make it personal</b>\n"
-        "Link your reading history and get personal recommendations:\n"
+        "Link your reading history for personalized summaries and recommendations:\n"
         "Use /goodreads &lt;your Goodreads profile link&gt;\n\n"
         "Then use /recommend for book suggestions.\n\n"
         "<i>Ready? Send your first book cover below.</i>\n"
@@ -101,23 +101,30 @@ async def goodreads(update, context):
         await update.message.reply_text("Couldn't fetch that. Check the link and try again.")
         return
 
-    save_goodreads(update.effective_user.id, data)          # DB mein daalo
-    await update.message.reply_text("Done! ✅ You'll now get personalized recommendations.")
+    user = update.effective_user
+    save_user(user.id, user.first_name)
+    save_goodreads(user.id, data)
+    await update.message.reply_text("Done! ✅ Your summaries and recommendations will now use your reading history.")
  
 
 async def recommend_cmd(update, context):
     user_id = update.effective_user.id
     user = get_user(user_id)                     # get (name, goodreads_data) from DB
 
-    goodreads_data = user[1]                      # index 1 = goodreads_data column
-
-    if goodreads_data is None:                    # user hasn't linked Goodreads
+    if user is None or user[1] is None:           # user hasn't linked Goodreads
         await update.message.reply_text("Link your Goodreads first with /goodreads to get personalized recommendations!")
         return
 
+    goodreads_data = user[1]                      # index 1 = goodreads_data column
+
     await update.message.reply_text("Finding books for you... ⏳")
 
-    data = json.loads(goodreads_data)             
+    try:
+        data = json.loads(goodreads_data)
+    except (TypeError, json.JSONDecodeError):
+        await update.message.reply_text("Your saved Goodreads data could not be read. Please link it again with /goodreads.")
+        return
+
     recs = recommend_for_user(data, n=5)          
     if not recs:                                  
         await update.message.reply_text("Couldn't find good matches yet — your books might not be in my dataset.")
@@ -131,7 +138,26 @@ async def handle_photo(update, context):
     file = await photo.get_file()                 
     await file.download_to_drive("incoming.jpg")  
     
-    summary = summarize(ocr("incoming.jpg"))       
+    book_text = ocr("incoming.jpg")
+    if not book_text.strip():
+        await update.message.reply_text("I couldn't read that cover. Try a clearer, well-lit photo.")
+        return
+
+    reading_profile = None
+    user = get_user(update.effective_user.id)
+    if user is not None and user[1] is not None:
+        try:
+            goodreads_data = json.loads(user[1])
+            reading_profile = build_reading_profile(goodreads_data)
+        except (TypeError, json.JSONDecodeError):
+            # Broken saved data should not prevent the normal summary.
+            reading_profile = None
+
+    try:
+        summary = summarize(book_text, reading_profile)
+    except (RuntimeError, ValueError):
+        await update.message.reply_text("I couldn't create the summary right now. Please try again shortly.")
+        return
     
     context.user_data['genres'] = get_genres(summary)   
     
