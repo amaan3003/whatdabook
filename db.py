@@ -17,7 +17,8 @@ def init_db():
 def save_user(telegram_id, name):
     conn = sqlite3.connect("users.db")
     conn.execute(
-        "INSERT OR REPLACE INTO users (telegram_id, name) VALUES (?, ?)",
+        """INSERT INTO users (telegram_id, name) VALUES (?, ?)
+        ON CONFLICT(telegram_id) DO UPDATE SET name = excluded.name""",
         (telegram_id, name)
     )
     conn.commit()

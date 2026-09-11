@@ -1,6 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, filters, ContextTypes,CallbackQueryHandler,CommandHandler
 import os
+from html import escape
 from dotenv import load_dotenv
 from summarizer import summarize
 from recommendationModel import get_genres,get_similar_books
@@ -66,7 +67,23 @@ def ocr(path):
 async def start(update, context):
     user = update.effective_user
     save_user(user.id, user.first_name)
-    await update.message.reply_text(f"Welcome {user.first_name}! 📚\n\nSend a book cover photo to get started.\nOr use /goodreads to link your profile for personalized recommendations.")
+    await update.message.reply_text(
+        f"Hey {escape(user.first_name)}! 👋\n\n"
+        "📚 <b>WhatDaBook</b>\n"
+        "<i>Find your next favourite read. </i>\n\n"
+        "📸 <b>Spot a book? Send its cover.</b>\n\n"
+        "Take a clear photo and get:\n"
+        "• A quick summary\n"
+        "• Reasons you might like or dislike it\n"
+        "• Similar books to explore\n\n"
+        "✨ <b>Make it personal</b>\n"
+        "Link your reading history and get personal recommendations:\n"
+        "Use /goodreads &lt;your Goodreads profile link&gt;\n\n"
+        "Then use /recommend for book suggestions.\n\n"
+        "<i>Ready? Send your first book cover below.</i>\n"
+        "Use /start anytime for a refresher.",
+        parse_mode="HTML",
+    )
     
     
     
