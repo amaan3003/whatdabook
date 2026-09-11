@@ -1,6 +1,7 @@
 .env
 __pycache__/
 *.pyc
+.venv/
 users.db
 *.pkl
 !book_names.pkl
@@ -8,3 +9,8 @@ users.db
 incoming.jpg
 kaggle_book_ratings/
 *.json
+
+# Recommendation datasets are downloaded/generated locally.
+# Keeping them out of Git prevents large files from bloating the repository.
+data/raw/
+data/processed/
