@@ -36,5 +36,14 @@ py -3.11 inspect_ratings.py
 The inspection is read-only: it reports the dataset's shape and common quality
 issues without changing the CSV files.
 
+To create the training and test files used for recommendation evaluation, run:
+
+```powershell
+.\.venv\Scripts\python.exe prepare_evaluation_data.py
+```
+
+This keeps one positive rating hidden for each eligible user. Generated files
+are written to `data/processed/goodbooks-10k/` and are excluded from Git.
+
 When publishing work based on this dataset, keep the source attribution above
 and describe any cleaning or filtering performed by the project.

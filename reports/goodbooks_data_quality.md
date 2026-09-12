@@ -24,6 +24,24 @@ The rating distribution is positively skewed: 68.97% of ratings are four or
 five stars. Evaluation should therefore include a simple popularity baseline
 and ranking metrics instead of relying only on rating-prediction error.
 
+## Evaluation split
+
+`prepare_evaluation_data.py` created a deterministic per-user split:
+
+- Training rows: 5,923,073
+- Test rows: 53,406
+- Evaluated users: 53,406
+- Users without an eligible positive test rating: 18
+
+For each eligible user, the script keeps their last rating of four or five
+stars as the hidden test book and leaves all their other ratings in training.
+The dataset is ordered by rating time, although it does not include the actual
+timestamps, so row order acts as the available recency signal.
+
+The script verifies that each user occurs at most once in the test data, every
+test rating is positive, every test user retains training history, and the
+training and test row counts add back up to the original dataset.
+
 ## Modelling implications
 
 - Store the interaction matrix as a sparse matrix. A dense 53,424 by 10,000
