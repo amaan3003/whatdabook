@@ -37,17 +37,16 @@ def scrape_goodreads(user_url):
     return data
 
 
-def build_reading_profile(goodreads_data):
-    """Extract a small set of strong taste signals from Goodreads data."""
+def extract_rated_books(goodreads_data):
+    """Return unique book titles with valid 1-5 star ratings."""
     if not isinstance(goodreads_data, dict):
-        return None
+        return []
 
     books = goodreads_data.get("books")
     if not isinstance(books, list):
-        return None
+        return []
 
-    liked_books = []
-    disliked_books = []
+    rated_books = []
     seen_titles = set()
 
     for book in books:
@@ -68,15 +67,29 @@ def build_reading_profile(goodreads_data):
         except (TypeError, ValueError):
             continue
 
-        if not 1 <= rating <= 5:
+        if rating not in {1, 2, 3, 4, 5}:
             continue
 
-        if rating >= 4:
-            liked_books.append((title, rating))
-            seen_titles.add(normalized_title)
-        elif rating <= 2:
-            disliked_books.append((title, rating))
-            seen_titles.add(normalized_title)
+        rated_books.append({"book_title": title, "rating": int(rating)})
+        seen_titles.add(normalized_title)
+
+    return rated_books
+
+
+def build_reading_profile(goodreads_data):
+    """Extract a small set of strong taste signals from Goodreads data."""
+    rated_books = extract_rated_books(goodreads_data)
+
+    liked_books = [
+        (book["book_title"], book["rating"])
+        for book in rated_books
+        if book["rating"] >= 4
+    ]
+    disliked_books = [
+        (book["book_title"], book["rating"])
+        for book in rated_books
+        if book["rating"] <= 2
+    ]
 
     liked_books.sort(key=lambda item: item[1], reverse=True)
     disliked_books.sort(key=lambda item: item[1])

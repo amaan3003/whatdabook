@@ -3,7 +3,12 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from bookRatingScraper import build_reading_profile, extract_user_id, scrape_goodreads
+from bookRatingScraper import (
+    build_reading_profile,
+    extract_rated_books,
+    extract_user_id,
+    scrape_goodreads,
+)
 from summarizer import build_summary_prompt
 
 
@@ -34,6 +39,24 @@ class ReadingProfileTests(unittest.TestCase):
         self.assertIsNone(build_reading_profile(data))
         self.assertIsNone(build_reading_profile({"books": []}))
         self.assertIsNone(build_reading_profile(None))
+
+    def test_extracts_all_valid_ratings_for_opted_in_training(self):
+        data = {
+            "books": [
+                {"book_title": "Dune", "rating": "5"},
+                {"book_title": "Neutral Book", "rating": 3},
+                {"book_title": "Unrated Book", "rating": 0},
+                {"book_title": "DUNE", "rating": 4},
+            ]
+        }
+
+        self.assertEqual(
+            extract_rated_books(data),
+            [
+                {"book_title": "Dune", "rating": 5},
+                {"book_title": "Neutral Book", "rating": 3},
+            ],
+        )
 
     def test_extracts_goodreads_user_id(self):
         self.assertEqual(

@@ -5,8 +5,20 @@ from html import escape
 from dotenv import load_dotenv
 from summarizer import summarize
 from recommendationModel import get_genres,get_similar_books
-from db import init_db, save_user, get_user,save_goodreads
-from bookRatingScraper import build_reading_profile, scrape_goodreads
+from db import (
+    get_user,
+    has_training_consent,
+    init_db,
+    replace_contributed_ratings,
+    save_goodreads,
+    save_user,
+    set_training_consent,
+)
+from bookRatingScraper import (
+    build_reading_profile,
+    extract_rated_books,
+    scrape_goodreads,
+)
 from userBasedMLmodel import recommend_for_user
 import json
 from google.cloud import vision
@@ -79,7 +91,8 @@ async def start(update, context):
         "✨ <b>Make it personal</b>\n"
         "Link your reading history for personalized summaries and recommendations:\n"
         "Use /goodreads &lt;your Goodreads profile link&gt;\n\n"
-        "Then use /recommend for book suggestions.\n\n"
+        "Then use /recommend for book suggestions.\n"
+        "Use /optout anytime to stop contributing ratings.\n\n"
         "<i>Ready? Send your first book cover below.</i>\n"
         "Use /start anytime for a refresher.",
         parse_mode="HTML",
@@ -104,7 +117,33 @@ async def goodreads(update, context):
     user = update.effective_user
     save_user(user.id, user.first_name)
     save_goodreads(user.id, data)
-    await update.message.reply_text("Done! ✅ Your summaries and recommendations will now use your reading history.")
+
+    if has_training_consent(user.id):
+        saved_count = replace_contributed_ratings(
+            user.id,
+            extract_rated_books(data),
+        )
+        await update.message.reply_text(
+            "Done! ✅ Your summaries and recommendations will now use your "
+            f"reading history. I also refreshed {saved_count} contributed ratings.\n\n"
+            "Use /optout anytime to remove contributed ratings."
+        )
+        return
+
+    contribution_keyboard = [[
+        InlineKeyboardButton(
+            "✅ Help improve recommendations",
+            callback_data="training_opt_in",
+        ),
+        InlineKeyboardButton("No thanks", callback_data="training_opt_out"),
+    ]]
+    await update.message.reply_text(
+        "Done! ✅ Your summaries and recommendations will now use your reading "
+        "history.\n\nWould you also like to contribute your book titles and "
+        "ratings to improve future recommendations? Your name and Telegram ID "
+        "will not be included in training exports, and you can use /optout anytime.",
+        reply_markup=InlineKeyboardMarkup(contribution_keyboard),
+    )
  
 
 async def recommend_cmd(update, context):
@@ -168,10 +207,51 @@ async def handle_photo(update, context):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)     
     )
+
+
+async def optout(update, context):
+    set_training_consent(update.effective_user.id, False)
+    await update.message.reply_text(
+        "You have opted out. Your contributed training ratings were removed. ✅\n\n"
+        "Your linked Goodreads data will still personalise your own summaries "
+        "and recommendations."
+    )
     
 async def button_handler(update, context):
     query = update.callback_query
     await query.answer()                              # acknowledge the tap (stops the loading spinner)
+
+    if query.data == "training_opt_in":
+        user = get_user(query.from_user.id)
+        if user is None or user[1] is None:
+            await query.message.reply_text(
+                "Link Goodreads first with /goodreads before contributing ratings."
+            )
+            return
+
+        try:
+            goodreads_data = json.loads(user[1])
+        except (TypeError, json.JSONDecodeError):
+            await query.message.reply_text(
+                "Your Goodreads data could not be read. Please link it again."
+            )
+            return
+
+        rated_books = extract_rated_books(goodreads_data)
+        set_training_consent(query.from_user.id, True)
+        saved_count = replace_contributed_ratings(query.from_user.id, rated_books)
+        await query.message.reply_text(
+            f"Thank you! ✅ {saved_count} ratings can now help improve the model.\n\n"
+            "Training exports exclude your name and Telegram ID. Use /optout anytime."
+        )
+        return
+
+    if query.data == "training_opt_out":
+        set_training_consent(query.from_user.id, False)
+        await query.message.reply_text(
+            "No problem—your ratings will only be used for your own personalisation."
+        )
+        return
     
     if query.data == "similar":
         genres = context.user_data.get('genres', [])  # genres saved when the photo was processed
@@ -200,6 +280,7 @@ init_db()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("goodreads",goodreads))
 app.add_handler(CommandHandler("recommend", recommend_cmd))  
+app.add_handler(CommandHandler("optout", optout))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(CallbackQueryHandler(button_handler)) 
 threading.Thread(target=run_flask, daemon=True).start()

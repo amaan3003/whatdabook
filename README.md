@@ -52,13 +52,16 @@ Both recommenders share the same core idea: **turn each book into a vector, meas
 
 ## Using your Goodreads data (optional)
 
-Collaborative filtering gets much sharper with your own ratings. Since Goodreads retired its public API, the bot uses your **library export** instead:
+Use `/goodreads <public profile link>` to connect a public Goodreads read shelf through PirateReads. WhatDaBook stores the returned book history for that user's personalised summaries and recommendations.
 
-1. Go to Goodreads → *My Books* → *Import and Export* → *Export Library*.
-2. Download the CSV.
-3. Send it to the bot when prompted.
+After linking, the bot separately asks whether the user wants to contribute book titles and 1–5 star ratings to future model experiments. Training contribution is optional:
 
-The bot parses the `Title` and `My Rating` columns, keeps only books you've actually rated, and feeds them into the recommender.
+- Tapping **Help improve recommendations** saves validated ratings in a separate table.
+- `/optout` revokes consent and immediately removes those contributed rows.
+- Personal summaries continue working after training opt-out.
+- Offline training exports replace Telegram IDs with temporary anonymous user IDs and never include names.
+
+Run `python export_contributed_ratings.py` to create the ignored local snapshot at `data/processed/user_contributions/ratings.csv`. This snapshot is an input for future evaluation and retraining; it does not update the production model automatically.
 
 ---
 

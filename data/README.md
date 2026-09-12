@@ -45,5 +45,20 @@ To create the training and test files used for recommendation evaluation, run:
 This keeps one positive rating hidden for each eligible user. Generated files
 are written to `data/processed/goodbooks-10k/` and are excluded from Git.
 
+## Opted-in WhatDaBook ratings
+
+Users who connect Goodreads can separately choose to contribute their validated
+book titles and ratings to future model experiments. To create an anonymised
+snapshot of only those opted-in rows, run:
+
+```powershell
+.\.venv\Scripts\python.exe export_contributed_ratings.py
+```
+
+The snapshot is written to `data/processed/user_contributions/ratings.csv`.
+It contains temporary user IDs, book titles, ratings, and a source label. It
+does not contain Telegram IDs or names. Run a complete export each time rather
+than appending snapshots because the temporary IDs are created per export.
+
 When publishing work based on this dataset, keep the source attribution above
 and describe any cleaning or filtering performed by the project.
