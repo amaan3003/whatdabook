@@ -21,12 +21,30 @@ def recommend(book_title, n=5):
 
 
 def recommend_for_user(goodreads_data, n=5):
+    recommendations = recommend_for_user_with_reasons(goodreads_data, n)
+    return [recommendation["title"] for recommendation in recommendations]
+
+
+def recommend_for_user_with_reasons(goodreads_data, n=5):
+    """Return ranked titles and the liked books that produced each candidate."""
     books = goodreads_data['books']
     liked = [b['book_title'] for b in books if b['rating'] >= 4]
     all_recs = []
+    recommendation_sources = {}
     for title in liked:
-        all_recs.extend(recommend(title))
+        for recommendation in recommend(title):
+            all_recs.append(recommendation)
+            recommendation_sources.setdefault(recommendation, []).append(title)
+
     liked_set = set(liked)
     all_recs = [b for b in all_recs if b not in liked_set]
-    return [book for book, _ in Counter(all_recs).most_common(n)]
+    ranked_recommendations = Counter(all_recs).most_common(n)
+
+    return [
+        {
+            "title": title,
+            "based_on": list(dict.fromkeys(recommendation_sources[title]))[:2],
+        }
+        for title, _ in ranked_recommendations
+    ]
 

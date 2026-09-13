@@ -1,4 +1,5 @@
 import re
+from difflib import SequenceMatcher
 
 import requests
 
@@ -7,6 +8,66 @@ PIRATEREADS_BASE_URL = "https://api.piratereads.com"
 REQUEST_TIMEOUT_SECONDS = 15
 MAX_LIKED_BOOKS = 10
 MAX_DISLIKED_BOOKS = 5
+
+
+def _normalize_book_text(value):
+    if not isinstance(value, str):
+        return ""
+    return " ".join(re.findall(r"[a-z0-9]+", value.casefold()))
+
+
+def _title_variants(title):
+    variants = {_normalize_book_text(title)}
+    for separator in (" (", " ["):
+        if separator in title:
+            variants.add(_normalize_book_text(title.split(separator, 1)[0]))
+    return {variant for variant in variants if variant}
+
+
+def find_existing_rating(book_text, goodreads_data):
+    """Find a confidently recognized cover in the user's complete rated history."""
+    if not isinstance(book_text, str) or not book_text.strip():
+        return None
+
+    rated_books = extract_rated_books(goodreads_data)
+    if not rated_books:
+        return None
+
+    normalized_lines = [
+        _normalize_book_text(line)
+        for line in book_text.splitlines()
+        if _normalize_book_text(line)
+    ]
+    line_windows = set(normalized_lines)
+    for window_size in (2, 3):
+        for start in range(len(normalized_lines) - window_size + 1):
+            line_windows.add(" ".join(normalized_lines[start : start + window_size]))
+
+    normalized_cover = _normalize_book_text(book_text)
+    best_match = None
+    best_score = 0.0
+
+    for book in rated_books:
+        for title_variant in _title_variants(book["book_title"]):
+            exact_line_match = title_variant in line_windows
+            safe_substring_match = (
+                len(title_variant) >= 4
+                and f" {title_variant} " in f" {normalized_cover} "
+            )
+            fuzzy_score = max(
+                (
+                    SequenceMatcher(None, title_variant, line).ratio()
+                    for line in line_windows
+                ),
+                default=0.0,
+            )
+
+            score = 1.0 if exact_line_match or safe_substring_match else fuzzy_score
+            if score >= 0.88 and score > best_score:
+                best_match = book
+                best_score = score
+
+    return best_match
 
 def extract_user_id(url: str):
     if not isinstance(url, str):
