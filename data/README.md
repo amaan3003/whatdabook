@@ -45,6 +45,17 @@ To create the training and test files used for recommendation evaluation, run:
 This keeps one positive rating hidden for each eligible user. Generated files
 are written to `data/processed/goodbooks-10k/` and are excluded from Git.
 
+To evaluate the currently saved personalized model on that split, run:
+
+```powershell
+.\.venv\Scripts\python.exe evaluate_current_model.py
+```
+
+The script reports ranking quality, exact-title coverage, repeated-read
+recommendations, and a popularity baseline. It keeps the saved similarity
+matrix sparse and writes the results to
+`reports/current_model_evaluation.md`.
+
 ## Opted-in WhatDaBook ratings
 
 Users who connect Goodreads can separately choose to contribute their validated
