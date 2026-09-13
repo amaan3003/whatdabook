@@ -79,23 +79,34 @@ def ocr(path):
 async def start(update, context):
     user = update.effective_user
     save_user(user.id, user.first_name)
+
+    saved_user = get_user(user.id)
+    goodreads_connected = saved_user is not None and saved_user[1] is not None
+    personalization_status = (
+        "✅ <b>Personalization is ready</b> — your Goodreads history is connected."
+        if goodreads_connected
+        else "✨ <b>Want personal results?</b> Connect your Goodreads history."
+    )
+    goodreads_button = (
+        "🔄 Refresh Goodreads" if goodreads_connected else "🔗 Connect Goodreads"
+    )
+    keyboard = [
+        [InlineKeyboardButton("📸 Scan a book", callback_data="start_scan")],
+        [InlineKeyboardButton("🎯 Get recommendations", callback_data="start_recommend")],
+        [InlineKeyboardButton(goodreads_button, callback_data="start_goodreads")],
+        [InlineKeyboardButton("❓ How it works", callback_data="start_help")],
+    ]
+
     await update.message.reply_text(
         f"Hey {escape(user.first_name)}! 👋\n\n"
         "📚 <b>WhatDaBook</b>\n"
-        "<i>Find your next favourite read. </i>\n\n"
-        "📸 <b>Spot a book? Send its cover.</b>\n\n"
-        "Take a clear photo and get:\n"
-        "• A quick summary\n"
-        "• Reasons you might like or dislike it\n"
-        "• Similar books to explore\n\n"
-        "✨ <b>Make it personal</b>\n"
-        "Link your reading history for personalized summaries and recommendations:\n"
-        "Use /goodreads &lt;your Goodreads profile link&gt;\n\n"
-        "Then use /recommend for book suggestions.\n"
-        "Use /optout anytime to stop contributing ratings.\n\n"
-        "<i>Ready? Send your first book cover below.</i>\n"
-        "Use /start anytime for a refresher.",
+        "<i>Your next great read starts with one photo.</i>\n\n"
+        "Send me a book cover and I’ll identify it, summarize it, and explain "
+        "why it may—or may not—fit your taste.\n\n"
+        f"{personalization_status}\n\n"
+        "What would you like to do?",
         parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
     
     
@@ -146,31 +157,42 @@ async def goodreads(update, context):
     )
  
 
-async def recommend_cmd(update, context):
-    user_id = update.effective_user.id
+async def send_personalized_recommendations(message, user_id):
     user = get_user(user_id)                     # get (name, goodreads_data) from DB
 
     if user is None or user[1] is None:           # user hasn't linked Goodreads
-        await update.message.reply_text("Link your Goodreads first with /goodreads to get personalized recommendations!")
+        await message.reply_text(
+            "Connect Goodreads first so I can learn your reading taste.\n\n"
+            "Send <code>/goodreads</code> followed by your public Goodreads "
+            "profile link.",
+            parse_mode="HTML",
+        )
         return
 
     goodreads_data = user[1]                      # index 1 = goodreads_data column
 
-    await update.message.reply_text("Finding books for you... ⏳")
+    await message.reply_text("Finding books for you... ⏳")
 
     try:
         data = json.loads(goodreads_data)
     except (TypeError, json.JSONDecodeError):
-        await update.message.reply_text("Your saved Goodreads data could not be read. Please link it again with /goodreads.")
+        await message.reply_text("Your saved Goodreads data could not be read. Please link it again with /goodreads.")
         return
 
     recs = recommend_for_user(data, n=5)          
     if not recs:                                  
-        await update.message.reply_text("Couldn't find good matches yet — your books might not be in my dataset.")
+        await message.reply_text("Couldn't find good matches yet — your books might not be in my dataset.")
         return
 
     msg = "📚 *Recommended for you:*\n\n" + "".join(f"• {b}\n" for b in recs)
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await message.reply_text(msg, parse_mode="Markdown")
+
+
+async def recommend_cmd(update, context):
+    await send_personalized_recommendations(
+        update.message,
+        update.effective_user.id,
+    )
 
 async def handle_photo(update, context):
     photo = update.message.photo[-1]             
@@ -220,6 +242,46 @@ async def optout(update, context):
 async def button_handler(update, context):
     query = update.callback_query
     await query.answer()                              # acknowledge the tap (stops the loading spinner)
+
+    if query.data == "start_scan":
+        await query.message.reply_text(
+            "📸 <b>Send me a clear photo of the book’s front cover.</b>\n\n"
+            "For the best result:\n"
+            "• Keep the title visible\n"
+            "• Use good lighting\n"
+            "• Avoid blur and glare",
+            parse_mode="HTML",
+        )
+        return
+
+    if query.data == "start_recommend":
+        await send_personalized_recommendations(
+            query.message,
+            query.from_user.id,
+        )
+        return
+
+    if query.data == "start_goodreads":
+        await query.message.reply_text(
+            "🔗 <b>Connect your Goodreads history</b>\n\n"
+            "Send <code>/goodreads</code> followed by your public profile link.\n\n"
+            "Example:\n"
+            "<code>/goodreads https://www.goodreads.com/user/show/123456</code>\n\n"
+            "I’ll use your ratings to personalize summaries and recommendations.",
+            parse_mode="HTML",
+        )
+        return
+
+    if query.data == "start_help":
+        await query.message.reply_text(
+            "<b>How WhatDaBook works</b> 📚\n\n"
+            "1️⃣ Send a clear photo of a book cover.\n"
+            "2️⃣ Get a summary and reasons you may like or dislike it.\n"
+            "3️⃣ Connect Goodreads for results based on your reading taste.\n\n"
+            "You can return to this menu anytime with /start.",
+            parse_mode="HTML",
+        )
+        return
 
     if query.data == "training_opt_in":
         user = get_user(query.from_user.id)
