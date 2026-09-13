@@ -27,14 +27,29 @@ def build_summary_prompt(description: str, reading_profile=None) -> str:
     has_reading_profile = bool(liked_books or disliked_books)
 
     personalized_output = ""
+    personalized_rules = ""
     reading_context = ""
     if has_reading_profile:
         personalized_output = """
+*⭐ Personal Match:*
+[Exactly five star symbols using ★ for filled and ☆ for empty] [integer score]/5
+[One short sentence explaining the strongest evidence for the score]
+
 *🎯 Why you might like it*
 [2 personalised bullet points based on the reading history]
 
 *⚠️ Why you might not like it*
 [2 personalised bullet points based on the reading history]
+"""
+        personalized_rules = """
+- Include the Personal Match section
+- Treat Personal Match as a taste-match score, not a statistical probability
+- Personal Match must be a whole number from 0 to 5 with exactly five symbols
+- Score 5 for a very strong match, 4 for a clear match, 3 for a mixed or
+  uncertain match, 2 for more conflicts than similarities, 1 for a strong
+  mismatch, and 0 when there is no meaningful taste overlap
+- Base the score on connections to both liked and disliked books; do not use
+  the photographed book's general popularity as the score
 """
         reading_context = f"""
 Reader preference data:
@@ -77,6 +92,7 @@ Rules:
 - Base personalised reasons only on the provided reading history
 - Do not claim certainty about the reader's preferences
 - If preference evidence is limited, say so clearly
+{personalized_rules}
 
 Book info:
 {description}

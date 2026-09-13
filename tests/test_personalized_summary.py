@@ -96,6 +96,10 @@ class SummaryPromptTests(unittest.TestCase):
 
         prompt = build_summary_prompt("Example book information", profile)
 
+        self.assertIn("Personal Match", prompt)
+        self.assertIn("whole number from 0 to 5", prompt)
+        self.assertIn("exactly five symbols", prompt)
+        self.assertIn("not a statistical probability", prompt)
         self.assertIn("Why you might like it", prompt)
         self.assertIn("Why you might not like it", prompt)
         self.assertIn("Dune", prompt)
@@ -104,6 +108,7 @@ class SummaryPromptTests(unittest.TestCase):
     def test_keeps_generic_prompt_without_profile(self):
         prompt = build_summary_prompt("Example book information")
 
+        self.assertNotIn("Personal Match", prompt)
         self.assertNotIn("Why you might like it", prompt)
         self.assertNotIn("Reader preference data", prompt)
         self.assertIn("What people liked", prompt)
