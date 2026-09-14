@@ -22,6 +22,7 @@ from db import (
 from bookRatingScraper import (
     build_reading_profile,
     extract_rated_books,
+    extract_user_id,
     find_existing_rating,
     scrape_goodreads,
 )
@@ -105,6 +106,8 @@ def book_context_from_summary(summary):
 async def start(update, context):
     user = update.effective_user
     save_user(user.id, user.first_name)
+    context.user_data.pop("awaiting_goodreads_link", None)
+    context.user_data.pop("awaiting_book_title", None)
 
     saved_user = get_user(user.id)
     goodreads_connected = saved_user is not None and saved_user[1] is not None
@@ -140,32 +143,55 @@ async def start(update, context):
     
     
     
-async def goodreads(update, context):
-    if not context.args:                                    
-        await update.message.reply_text("Send it like: /goodreads <your profile link>")
+async def ask_for_goodreads_link(message, context):
+    context.user_data.pop("awaiting_book_title", None)
+    context.user_data["awaiting_goodreads_link"] = True
+    keyboard = [[
+        InlineKeyboardButton("Cancel", callback_data="goodreads_cancel")
+    ]]
+    await message.reply_text(
+        "🔗 <b>Paste your public Goodreads profile link</b>\n\n"
+        "It should look like:\n"
+        "<code>https://www.goodreads.com/user/show/123456-your-name</code>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+async def connect_goodreads(message, telegram_user, context, link):
+    if extract_user_id(link) is None:
+        await message.reply_text(
+            "That doesn’t look like a Goodreads profile link. Please copy the "
+            "link from your public Goodreads profile and try again."
+        )
         return
 
-    link = context.args[0]                            
-    await update.message.reply_text("Fetching your Goodreads data... ⏳")
+    status_message = await message.reply_text("Fetching your Goodreads data... ⏳")
+    data = await asyncio.to_thread(scrape_goodreads, link)
 
-    data = scrape_goodreads(link)                           
-
-    if data is None:                                     
-        await update.message.reply_text("Couldn't fetch that. Check the link and try again.")
+    if data is None:
+        await status_message.edit_text(
+            "I found the profile link, but couldn’t read its book history. Make "
+            "sure the profile is public, then paste the link again."
+        )
         return
 
-    user = update.effective_user
+    context.user_data.pop("awaiting_goodreads_link", None)
+    user = telegram_user
     save_user(user.id, user.first_name)
     save_goodreads(user.id, data)
+    rated_books = extract_rated_books(data)
+    rating_word = "rating" if len(rated_books) == 1 else "ratings"
 
     if has_training_consent(user.id):
         saved_count = replace_contributed_ratings(
             user.id,
-            extract_rated_books(data),
+            rated_books,
         )
-        await update.message.reply_text(
-            "Done! ✅ Your summaries and recommendations will now use your "
-            f"reading history. I also refreshed {saved_count} contributed ratings.\n\n"
+        await status_message.edit_text(
+            f"Done! ✅ Imported {len(rated_books)} {rating_word}. Your summaries "
+            "and recommendations will now use your reading history. I also "
+            f"refreshed {saved_count} contributed ratings.\n\n"
             "Use /optout anytime to remove contributed ratings."
         )
         return
@@ -177,12 +203,68 @@ async def goodreads(update, context):
         ),
         InlineKeyboardButton("No thanks", callback_data="training_opt_out"),
     ]]
-    await update.message.reply_text(
-        "Done! ✅ Your summaries and recommendations will now use your reading "
-        "history.\n\nWould you also like to contribute your book titles and "
+    await status_message.edit_text(
+        f"Done! ✅ Imported {len(rated_books)} {rating_word}. Your summaries and "
+        "recommendations will now use your reading history.\n\nWould you also "
+        "like to contribute your book titles and "
         "ratings to improve future recommendations? Your name and Telegram ID "
         "will not be included in training exports, and you can use /optout anytime.",
         reply_markup=InlineKeyboardMarkup(contribution_keyboard),
+    )
+
+
+async def goodreads(update, context):
+    context.user_data.pop("awaiting_book_title", None)
+    context.user_data["awaiting_goodreads_link"] = True
+    if context.args:
+        await connect_goodreads(
+            update.message,
+            update.effective_user,
+            context,
+            context.args[0],
+        )
+        return
+
+    await ask_for_goodreads_link(update.message, context)
+
+
+async def handle_text(update, context):
+    text = update.message.text.strip()
+
+    if context.user_data.get("awaiting_goodreads_link"):
+        await connect_goodreads(
+            update.message,
+            update.effective_user,
+            context,
+            text,
+        )
+        return
+
+    if not context.user_data.get("awaiting_book_title"):
+        return
+
+    if len(text) < 2:
+        await update.message.reply_text(
+            "Please enter at least two characters from the book title."
+        )
+        return
+
+    if len(text) > 300:
+        await update.message.reply_text(
+            "That is a little too long for a title. Please send only the book "
+            "title and, if you know it, the author."
+        )
+        return
+
+    context.user_data.pop("awaiting_book_title", None)
+    status_message = await update.message.reply_text(
+        "🔎 Looking up that book..."
+    )
+    await build_book_report(
+        update.effective_user.id,
+        context,
+        text,
+        status_message,
     )
  
 
@@ -244,8 +326,8 @@ async def send_personalized_recommendations(message, user_id):
     if user is None or user[1] is None:           # user hasn't linked Goodreads
         await message.reply_text(
             "Connect Goodreads first so I can learn your reading taste.\n\n"
-            "Send <code>/goodreads</code> followed by your public Goodreads "
-            "profile link.",
+            "Send <code>/goodreads</code>, then paste your public Goodreads "
+            "profile link when I ask for it.",
             parse_mode="HTML",
         )
         return
@@ -302,6 +384,8 @@ async def send_personalized_recommendations(message, user_id):
 
 
 async def recommend_cmd(update, context):
+    context.user_data.pop("awaiting_goodreads_link", None)
+    context.user_data.pop("awaiting_book_title", None)
     await send_personalized_recommendations(
         update.message,
         update.effective_user.id,
@@ -353,42 +437,15 @@ async def send_profile(message, telegram_user):
 
 
 async def profile_cmd(update, context):
+    context.user_data.pop("awaiting_goodreads_link", None)
+    context.user_data.pop("awaiting_book_title", None)
     await send_profile(update.message, update.effective_user)
 
-async def handle_photo(update, context):
-    status_message = await update.message.reply_text(
-        "📥 Photo received. Getting it ready..."
-    )
 
-    image_path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as image_file:
-            image_path = Path(image_file.name)
-
-        photo = update.message.photo[-1]
-        file = await photo.get_file()
-        await file.download_to_drive(image_path)
-        await status_message.edit_text("🔍 Reading the title and cover text...")
-        book_text = await asyncio.to_thread(ocr, str(image_path))
-    except (OSError, RuntimeError, GoogleAPICallError, TelegramError):
-        await status_message.edit_text(
-            "I couldn’t process that photo right now. Please try again shortly."
-        )
-        return
-    finally:
-        if image_path is not None:
-            image_path.unlink(missing_ok=True)
-
-    if not book_text.strip():
-        await status_message.edit_text(
-            "I couldn’t read any text on that cover. 📸\n\n"
-            "Try again with the front cover filling the frame, good lighting, "
-            "and as little glare as possible."
-        )
-        return
-
+async def build_book_report(user_id, context, book_text, status_message):
+    """Build the same book report whether text came from OCR or user input."""
     reading_profile = None
-    user = get_user(update.effective_user.id)
+    user = get_user(user_id)
     if user is not None and user[1] is not None:
         try:
             goodreads_data = json.loads(user[1])
@@ -411,16 +468,16 @@ async def handle_photo(update, context):
             "I couldn’t create the book report right now. Please try again shortly."
         )
         return
-    
+
     context.user_data["genres"] = get_genres(summary)
     context.user_data["last_book_text"] = book_text
     context.user_data.pop("similar_books", None)
     context.user_data.pop("similar_books_source", None)
     context.user_data.pop("similar_result_shown", None)
     context.user_data.pop("similar_lookup_in_progress", None)
-    
-    keyboard = [[InlineKeyboardButton("📚 Similar Books", callback_data="similar")]]  
-    
+
+    keyboard = [[InlineKeyboardButton("📚 Similar Books", callback_data="similar")]]
+
     try:
         await status_message.edit_text(
             summary,
@@ -433,6 +490,61 @@ async def handle_photo(update, context):
             summary,
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
+
+
+async def handle_photo(update, context):
+    context.user_data.pop("awaiting_goodreads_link", None)
+    context.user_data.pop("awaiting_book_title", None)
+    status_message = await update.message.reply_text(
+        "📥 Photo received. Getting it ready..."
+    )
+
+    image_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as image_file:
+            image_path = Path(image_file.name)
+
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        await file.download_to_drive(image_path)
+        await status_message.edit_text("🔍 Reading the title and cover text...")
+        book_text = await asyncio.to_thread(ocr, str(image_path))
+    except (OSError, RuntimeError, GoogleAPICallError, TelegramError):
+        await status_message.edit_text(
+            "I couldn’t process that photo right now. You can try another photo "
+            "or type the book title instead.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "⌨️ Type book title",
+                    callback_data="type_book_title",
+                )
+            ]]),
+        )
+        return
+    finally:
+        if image_path is not None:
+            image_path.unlink(missing_ok=True)
+
+    if not book_text.strip():
+        await status_message.edit_text(
+            "I couldn’t read any text on that cover. 📸\n\n"
+            "Try again with the front cover filling the frame, good lighting, "
+            "and as little glare as possible—or type the title instead.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "⌨️ Type book title",
+                    callback_data="type_book_title",
+                )
+            ]]),
+        )
+        return
+
+    await build_book_report(
+        update.effective_user.id,
+        context,
+        book_text,
+        status_message,
+    )
 
 
 async def optout(update, context):
@@ -448,8 +560,12 @@ async def button_handler(update, context):
     await query.answer()                              # acknowledge the tap (stops the loading spinner)
 
     if query.data == "start_scan":
+        context.user_data.pop("awaiting_goodreads_link", None)
+        context.user_data.pop("awaiting_book_title", None)
         await query.message.reply_text(
-            "📸 <b>Send me a clear photo of the book’s front cover.</b>\n\n"
+            "📸 <b>Take a photo of the book’s front cover</b>\n\n"
+            "Tap Telegram’s attachment or camera icon below, choose "
+            "<b>Camera</b>, and send the photo.\n\n"
             "For the best result:\n"
             "• Keep the title visible\n"
             "• Use good lighting\n"
@@ -458,7 +574,33 @@ async def button_handler(update, context):
         )
         return
 
+    if query.data == "type_book_title":
+        context.user_data.pop("awaiting_goodreads_link", None)
+        context.user_data["awaiting_book_title"] = True
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except TelegramError:
+            pass
+        await query.message.reply_text(
+            "⌨️ <b>Type the book title</b>\n\n"
+            "You can include the author for a more accurate result, for example:\n"
+            "<code>The Kite Runner by Khaled Hosseini</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("Cancel", callback_data="book_title_cancel")
+            ]]),
+        )
+        return
+
+    if query.data == "book_title_cancel":
+        context.user_data.pop("awaiting_book_title", None)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text("Book title entry cancelled.")
+        return
+
     if query.data == "start_recommend":
+        context.user_data.pop("awaiting_goodreads_link", None)
+        context.user_data.pop("awaiting_book_title", None)
         await send_personalized_recommendations(
             query.message,
             query.from_user.id,
@@ -466,21 +608,24 @@ async def button_handler(update, context):
         return
 
     if query.data == "start_goodreads":
-        await query.message.reply_text(
-            "🔗 <b>Connect your Goodreads history</b>\n\n"
-            "Send <code>/goodreads</code> followed by your public profile link.\n\n"
-            "Example:\n"
-            "<code>/goodreads https://www.goodreads.com/user/show/123456</code>\n\n"
-            "I’ll use your ratings to personalize summaries and recommendations.",
-            parse_mode="HTML",
-        )
+        await ask_for_goodreads_link(query.message, context)
+        return
+
+    if query.data == "goodreads_cancel":
+        context.user_data.pop("awaiting_goodreads_link", None)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text("Goodreads connection cancelled.")
         return
 
     if query.data == "start_profile":
+        context.user_data.pop("awaiting_goodreads_link", None)
+        context.user_data.pop("awaiting_book_title", None)
         await send_profile(query.message, query.from_user)
         return
 
     if query.data == "start_help":
+        context.user_data.pop("awaiting_goodreads_link", None)
+        context.user_data.pop("awaiting_book_title", None)
         await query.message.reply_text(
             "<b>How WhatDaBook works</b> 📚\n\n"
             "1️⃣ Send a clear photo of a book cover.\n"
@@ -636,6 +781,7 @@ app.add_handler(CommandHandler("recommend", recommend_cmd))
 app.add_handler(CommandHandler("profile", profile_cmd))
 app.add_handler(CommandHandler("optout", optout))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(CallbackQueryHandler(button_handler)) 
 threading.Thread(target=run_flask, daemon=True).start()
 app.run_polling()
