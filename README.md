@@ -81,6 +81,25 @@ Building this surfaced a lot of real problems worth documenting:
 
 ## Running locally
 
+### Admin statistics
+
+Send `/myid` to the bot in a private chat, then set `ADMIN_TELEGRAM_ID` to that
+numeric ID in Azure App Service environment variables. `/stats` only responds
+with analytics to that ID in private chat; an unset ID grants nobody access.
+
+Stats include total saved users, new users today, distinct active users today
+and over the last seven UTC calendar days, photo scan requests, and recommendation
+requests (including similar-book requests). Activity counts start when this
+version is deployed and include unsuccessful requests. Opening the bot without
+interacting is not counted. Existing migrated user creation dates may reflect
+the earlier database migration rather than the original signup date.
+
+On Azure App Service, SQLite defaults to `/home/whatdabook/users.db` so it survives
+code deployments. An existing working-directory `users.db` is copied on first
+startup if the destination does not exist. `DATABASE_PATH` can override this path;
+its directory must be writable and persistent. Keep App Service `/home` storage
+enabled and run a single bot instance for Telegram polling and SQLite.
+
 ```bash
 git clone https://github.com/amaan3003/whatdabook
 cd whatdabook

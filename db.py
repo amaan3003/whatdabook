@@ -1,8 +1,13 @@
 import json
 import sqlite3
+import os
+from pathlib import Path
+from contextlib import closing
 
 
-DATABASE_PATH = "users.db"
+DATABASE_PATH = os.getenv("DATABASE_PATH") or (
+    "/home/whatdabook/users.db" if os.getenv("WEBSITE_SITE_NAME") else "users.db"
+)
 
 
 def _connect():
@@ -17,6 +22,11 @@ def _user_columns(connection):
 
 def init_db():
     """Create the database and add new columns without losing existing users."""
+    target = Path(DATABASE_PATH)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if DATABASE_PATH == "/home/whatdabook/users.db" and not target.exists() and Path("users.db").exists():
+        with closing(sqlite3.connect("users.db")) as source, closing(sqlite3.connect(DATABASE_PATH)) as destination:
+            source.backup(destination)
     connection = _connect()
     connection.execute(
         """
@@ -62,6 +72,17 @@ def init_db():
         )
         """
     )
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS daily_activity (
+            telegram_id INTEGER NOT NULL,
+            day TEXT NOT NULL,
+            interactions INTEGER NOT NULL DEFAULT 0,
+            photo_requests INTEGER NOT NULL DEFAULT 0,
+            recommendation_requests INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (telegram_id, day),
+            FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
+        )
+    """)
     connection.commit()
     connection.close()
 

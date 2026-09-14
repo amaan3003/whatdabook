@@ -1,5 +1,6 @@
 from telegram import BotCommand, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, MessageHandler, filters, ContextTypes,CallbackQueryHandler,CommandHandler
+from telegram.ext import Application, MessageHandler, filters, ContextTypes,CallbackQueryHandler,CommandHandler,TypeHandler
+from bot_stats import track_activity, stats_cmd, myid_cmd
 from telegram.error import BadRequest, TelegramError
 import asyncio
 import os
@@ -775,6 +776,9 @@ app = (
     .build()
 )
 init_db()
+app.add_handler(TypeHandler(Update, track_activity), group=-1)
+app.add_handler(CommandHandler("stats", stats_cmd))
+app.add_handler(CommandHandler("myid", myid_cmd))
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("goodreads",goodreads))
 app.add_handler(CommandHandler("recommend", recommend_cmd))  
