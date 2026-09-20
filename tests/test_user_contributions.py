@@ -80,6 +80,24 @@ class UserContributionTests(unittest.TestCase):
             },
         )
 
+    def test_starting_again_preserves_goodreads_data_and_consent(self):
+        """Calling save_user again mirrors /start for an existing user."""
+        goodreads_data = {
+            "books": [
+                {"book_title": "Dune", "rating": 5},
+            ]
+        }
+        db.save_user(101, "Reader")
+        db.save_goodreads(101, goodreads_data)
+        db.set_training_consent(101, True)
+
+        db.save_user(101, "Updated Telegram Name")
+
+        name, saved_goodreads = db.get_user(101)
+        self.assertEqual(name, "Updated Telegram Name")
+        self.assertEqual(json.loads(saved_goodreads), goodreads_data)
+        self.assertTrue(db.has_training_consent(101))
+
     def test_anonymized_export_excludes_telegram_ids(self):
         exported = anonymize_ratings(
             [
