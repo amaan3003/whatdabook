@@ -1,9 +1,9 @@
 """Aggregate bot analytics; never store message bodies or photos."""
-import logging
 import os
 from contextlib import closing
 
 import db
+from bot_runtime import error_fields, logger, run_in_worker
 
 
 def record_activity(user_id, name, photo=False, recommendation=False):
@@ -48,11 +48,11 @@ async def track_activity(update, context):
     command = command[0].split('@')[0].lower() if command else ''
     callback = update.callback_query.data if update.callback_query else None
     try:
-        record_activity(user.id, user.first_name,
+        await run_in_worker("activity_db", record_activity, user.id, user.first_name,
                         photo=bool(update.message and update.message.photo),
                         recommendation=command == '/recommend' or callback in ('start_recommend', 'similar'))
-    except Exception:
-        logging.getLogger(__name__).exception('Could not record bot activity')
+    except Exception as error:
+        logger.error('event=activity_failed %s', error_fields(error))
 
 
 async def myid_cmd(update, context):

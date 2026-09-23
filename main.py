@@ -2,7 +2,6 @@ from telegram import BotCommand, Update, InlineKeyboardButton, InlineKeyboardMar
 from telegram.ext import Application, MessageHandler, filters, ContextTypes,CallbackQueryHandler,CommandHandler,TypeHandler
 from bot_stats import track_activity, stats_cmd, myid_cmd
 from telegram.error import BadRequest, TelegramError
-import asyncio
 import os
 from html import escape
 from pathlib import Path
@@ -28,6 +27,10 @@ from bookRatingScraper import (
     scrape_goodreads,
 )
 from userBasedMLmodel import recommend_for_user_with_reasons
+from rate_limiter import SlidingWindowRateLimiter
+from bot_runtime import (
+    configure_logging, error_fields, guard_user_flow, logger, run_in_worker, timed_stage,
+)
 import json
 from google.cloud import vision
 from google.api_core.client_options import ClientOptions
@@ -36,6 +39,14 @@ load_dotenv()
 from flask import Flask
 import threading
 
+
+PHOTO_RATE_LIMIT = 7
+PHOTO_RATE_WINDOW_SECONDS = 60
+MAX_CONCURRENT_UPDATES = 8
+photo_rate_limiter = SlidingWindowRateLimiter(
+    limit=PHOTO_RATE_LIMIT,
+    window_seconds=PHOTO_RATE_WINDOW_SECONDS,
+)
 
 
 
@@ -57,9 +68,6 @@ def run_flask():
 
 
 
-telegramBot = os.getenv("TELEGRAM_TOKEN")
-if not telegramBot:
-    raise ValueError("API_KEY not found in environment")
 
 
 
@@ -69,15 +77,14 @@ if not telegramBot:
 
 
 def ocr(path):
-    client = vision.ImageAnnotatorClient(
-        client_options=ClientOptions(api_key=os.getenv("GOOGLE_CLOUD_VISION_API_KEY"))
-    )
-
     with open(path, "rb") as f:
         content = f.read()
         
     image = vision.Image(content=content)
-    response = client.text_detection(image=image)   
+    with vision.ImageAnnotatorClient(
+        client_options=ClientOptions(api_key=os.getenv("GOOGLE_CLOUD_VISION_API_KEY"))
+    ) as client:
+        response = client.text_detection(image=image, timeout=20, retry=None)
     if response.error.message:
         raise RuntimeError("The cover-reading service returned an error.")
     texts = response.text_annotations           
@@ -168,7 +175,7 @@ async def connect_goodreads(message, telegram_user, context, link):
         return
 
     status_message = await message.reply_text("Fetching your Goodreads data... ⏳")
-    data = await asyncio.to_thread(scrape_goodreads, link)
+    data = await run_in_worker("goodreads_import", scrape_goodreads, link)
 
     if data is None:
         await status_message.edit_text(
@@ -347,7 +354,12 @@ async def send_personalized_recommendations(message, user_id):
         return
 
     try:
-        recommendations = recommend_for_user_with_reasons(data, n=5)
+        recommendations = await run_in_worker(
+            "personalized_recommendations",
+            recommend_for_user_with_reasons,
+            data,
+            n=5,
+        )
     except (KeyError, TypeError):
         await status_message.edit_text(
             "Your saved Goodreads ratings could not be used. Please refresh them "
@@ -362,7 +374,8 @@ async def send_personalized_recommendations(message, user_id):
         return
 
     await status_message.edit_text("✨ Turning your recommendations into book cards...")
-    metadata_results = await asyncio.to_thread(
+    metadata_results = await run_in_worker(
+        "book_metadata",
         fetch_recommendation_metadata,
         [recommendation["title"] for recommendation in recommendations],
     )
@@ -463,7 +476,7 @@ async def build_book_report(user_id, context, book_text, status_message):
     await status_message.edit_text(f"🧠 Building your {report_type}...")
 
     try:
-        summary = await asyncio.to_thread(summarize, book_text, reading_profile)
+        summary = await run_in_worker("llm_summary", summarize, book_text, reading_profile)
     except (RuntimeError, ValueError):
         await status_message.edit_text(
             "I couldn’t create the book report right now. Please try again shortly."
@@ -493,7 +506,7 @@ async def build_book_report(user_id, context, book_text, status_message):
         )
 
 
-async def handle_photo(update, context):
+async def process_photo(update, context):
     context.user_data.pop("awaiting_goodreads_link", None)
     context.user_data.pop("awaiting_book_title", None)
     status_message = await update.message.reply_text(
@@ -506,10 +519,11 @@ async def handle_photo(update, context):
             image_path = Path(image_file.name)
 
         photo = update.message.photo[-1]
-        file = await photo.get_file()
-        await file.download_to_drive(image_path)
+        with timed_stage("photo_download"):
+            file = await photo.get_file()
+            await file.download_to_drive(image_path)
         await status_message.edit_text("🔍 Reading the title and cover text...")
-        book_text = await asyncio.to_thread(ocr, str(image_path))
+        book_text = await run_in_worker("ocr", ocr, str(image_path))
     except (OSError, RuntimeError, GoogleAPICallError, TelegramError):
         await status_message.edit_text(
             "I couldn’t process that photo right now. You can try another photo "
@@ -546,6 +560,33 @@ async def handle_photo(update, context):
         book_text,
         status_message,
     )
+
+
+async def handle_photo(update, context):
+    user = update.effective_user
+    if user is None:
+        return
+
+    if context.user_data.get("photo_processing"):
+        await update.message.reply_text(
+            "I’m still processing your previous photo. Please wait for that "
+            "book report before sending another one."
+        )
+        return
+
+    allowed, retry_after = photo_rate_limiter.check(user.id)
+    if not allowed:
+        await update.message.reply_text(
+            f"You’ve reached the limit of {PHOTO_RATE_LIMIT} photos per minute. "
+            f"Please try again in about {retry_after} seconds."
+        )
+        return
+
+    context.user_data["photo_processing"] = True
+    try:
+        await process_photo(update, context)
+    finally:
+        context.user_data.pop("photo_processing", None)
 
 
 async def optout(update, context):
@@ -690,7 +731,7 @@ async def button_handler(update, context):
                 books = context.user_data["similar_books"]
                 source = context.user_data.get("similar_books_source", "local")
             else:
-                books = get_similar_books(genres, n=5)
+                books = await run_in_worker("similar_local", get_similar_books, genres, n=5)
                 source = "local"
 
                 if not books:
@@ -703,7 +744,8 @@ async def button_handler(update, context):
                         book_context = book_context_from_summary(message_text)
 
                     try:
-                        books = await asyncio.to_thread(
+                        books = await run_in_worker(
+                            "llm_similar",
                             suggest_similar_books,
                             book_context,
                             genres,
@@ -750,6 +792,24 @@ async def button_handler(update, context):
             context.user_data["similar_lookup_in_progress"] = False
  
 
+async def handle_error(update, context):
+    """Log unexpected failures and avoid leaving the user with silence."""
+    error = context.error
+    if isinstance(error, BaseException):
+        logger.error("event=unhandled_update %s", error_fields(error))
+    else:
+        logger.error("event=unhandled_update error=unknown")
+
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "Something went wrong while handling that request. Please try "
+                "again shortly."
+            )
+        except TelegramError as reply_error:
+            logger.error("event=error_reply_failed %s", error_fields(reply_error))
+
+
 async def register_bot_commands(application):
     await application.bot.set_my_commands(
         [
@@ -767,28 +827,38 @@ async def register_bot_commands(application):
  
 
 
-# App handlers
+def create_application():
+    telegram_token = os.getenv("TELEGRAM_TOKEN")
+    if not telegram_token:
+        raise ValueError("TELEGRAM_TOKEN not found in environment")
 
-app = (
-    Application.builder()
-    .token(telegramBot)
-    .post_init(register_bot_commands)
-    .build()
-)
-init_db()
-app.add_handler(TypeHandler(Update, track_activity), group=-1)
-app.add_handler(CommandHandler("stats", stats_cmd))
-app.add_handler(CommandHandler("myid", myid_cmd))
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("goodreads",goodreads))
-app.add_handler(CommandHandler("recommend", recommend_cmd))  
-app.add_handler(CommandHandler("profile", profile_cmd))
-app.add_handler(CommandHandler("optout", optout))
-app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-app.add_handler(CallbackQueryHandler(button_handler)) 
-threading.Thread(target=run_flask, daemon=True).start()
-app.run_polling()
+    app = (
+        Application.builder()
+        .token(telegram_token)
+        .post_init(register_bot_commands)
+        .concurrent_updates(MAX_CONCURRENT_UPDATES)
+        .build()
+    )
+    app.add_error_handler(handle_error)
+    app.add_handler(TypeHandler(Update, track_activity), group=-1)
+    for command, handler in (
+        ("stats", stats_cmd), ("myid", myid_cmd), ("start", start),
+        ("goodreads", goodreads), ("recommend", recommend_cmd),
+        ("profile", profile_cmd), ("optout", optout),
+    ):
+        app.add_handler(CommandHandler(command, guard_user_flow(handler)))
+    app.add_handler(MessageHandler(filters.PHOTO, guard_user_flow(handle_photo)))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, guard_user_flow(handle_text)))
+    app.add_handler(CallbackQueryHandler(guard_user_flow(button_handler)))
+    return app
+
+
+if __name__ == "__main__":
+    configure_logging()
+    init_db()
+    app = create_application()
+    threading.Thread(target=run_flask, daemon=True).start()
+    app.run_polling()
 
 
 
